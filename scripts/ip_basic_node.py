@@ -8,35 +8,28 @@ import cv2
 import numpy as np
 import png
 
-from ip_basic import depth_map_utils
-from ip_basic import vis_utils
+try:
+    from ip_basic import depth_map_utils
+    from ip_basic import vis_utils
+except ImportError as error:
+    print(error.__class__.__name__ + ": " + error.message)
 
 import rospy
 from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
 
 class depth_completer:
     def __init__(self):
-        mode = rospy.get_param(~mode, 'fast_gaussian')
-        if mode == 'fast_gaussian':
-            self.fill_type = 'fast'
-            self.extrapolate = True
-            self.blur_type = 'gaussian'
-        elif mode == 'fast_bilateral':
-            self.fill_type = 'fast'
-            self.extrapolate = True
-            self.blur_type = 'gaussian'
-        elif mode == 'multiscale':
-            self.fill_type = 'fast'
-            self.extrapolate = True
-            self.blur_type = 'gaussian'
-        else:
-            print("Invalid mode.")
-            return       
+        self.fill_type = rospy.get_param("fill_type", 'fast')
+        self.extrapolate = rospy.get_param("extrapolate", False)
+        self.blur_type = rospy.get_param("blur_type", 'gaussian')
 
         self.sub = rospy.Subscriber("input", Image, self.complete_depth)
         self.pub = rospy.Publisher("output", Image, queue_size=1)
         
         self.bridge = CvBridge()
+
+        print("Initialized.")
 
     def complete_depth(self, img_msg):
         fill_type = self.fill_type
@@ -45,9 +38,9 @@ class depth_completer:
 
         ## Load depth projections from uint16 image
         try:
-            depth_image = self.bridge.imgmsg_to_cv2(img_msg, cv2.IMREAD_ANYDEPTH)
+            depth_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="passthrough")
         except CvBridgeError as e:
-            # print(e)
+            print(e)
             return
         projected_depths = np.float32(depth_image / 256.0)
 
@@ -60,12 +53,23 @@ class depth_completer:
                 projected_depths, extrapolate=extrapolate, blur_type=blur_type,
                 show_process=False)
         else:
+            print("Failed to fill.")
             raise ValueError('Invalid fill_type {}'.format(fill_type))
+            # return
 
-def main(args):
+        depth_image = (final_depths * 256).astype(np.uint16)
+
+        try:
+            new_img_msg = self.bridge.cv2_to_imgmsg(depth_image, "16UC1")
+            new_img_msg.header = img_msg.header
+            self.pub.publish(new_img_msg)
+            # print("Published image.")
+        except CvBridgeError as e:
+            print(e)
+
+def main():
     dp = depth_completer()
     rospy.init_node("ip_basic_node", anonymous=True)
-    print("Initialized.")
     try:
         rospy.spin()
     except KeyboardInterrupt:
@@ -73,7 +77,7 @@ def main(args):
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
 
 
 
